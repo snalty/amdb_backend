@@ -1,9 +1,19 @@
-#[macro_use] extern crate rocket;
-#[macro_use] extern crate rocket_db_pools;
+#[macro_use]
+extern crate rocket;
 
-use rocket::{serde::{Serialize, Deserialize, json::Json}, form::Form, futures::TryStreamExt, http::Method};
-use rocket_cors::{AllowedOrigins, AllowedHeaders};
-use rocket_db_pools::{sqlx, Database, Connection};
+use rocket::{
+    futures::TryStreamExt,
+    http::Method,
+    serde::{json::Json, Deserialize, Serialize},
+};
+use rocket_cors::{AllowedHeaders, AllowedOrigins};
+use rocket_db_pools::{sqlx, Connection, Database};
+use rocket_okapi::{
+    okapi::schemars,
+    openapi_get_routes,
+    swagger_ui::{make_swagger_ui, SwaggerUIConfig}, rapidoc::{RapiDocConfig, make_rapidoc, GeneralConfig, HideShowConfig}, settings::UrlObject,
+};
+use rocket_okapi::{okapi::schemars::JsonSchema, openapi};
 
 #[derive(Database)]
 #[database("sqlx")]
@@ -11,7 +21,7 @@ struct Db(sqlx::PgPool);
 
 type Result<T, E = rocket::response::Debug<sqlx::Error>> = std::result::Result<T, E>;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(crate = "rocket::serde")]
 struct AlphamissenseResult {
     chrom: String,
@@ -26,17 +36,23 @@ struct AlphamissenseResult {
     am_class: String,
 }
 
-#[derive(FromForm)]
+#[derive(FromForm, JsonSchema)]
 struct AlphamissenseQuery {
     chrom: String,
     pos: i32,
-    ref_allele: Option<String>,
-    alt_allele: Option<String>,
+    ref_allele: String,
+    alt_allele: String,
     genome: String,
 }
-
-#[get("/variant?<query..>")]
-async fn get_variant(mut db: Connection<Db>, query: AlphamissenseQuery) -> Result<Json<Vec<AlphamissenseResult>>> {
+/// # Get variant at position
+///
+/// Returns variant at a given chromosome, position, reference allele and alternate allele and genome
+#[openapi(tag = "Variants")]
+#[get("/v1/variant?<query..>")]
+async fn get_variant(
+    mut db: Connection<Db>,
+    query: AlphamissenseQuery,
+) -> Result<Json<AlphamissenseResult>> {
     let results = sqlx::query_as!(
         AlphamissenseResult,
         "SELECT * FROM alphamissense 
@@ -44,9 +60,14 @@ async fn get_variant(mut db: Connection<Db>, query: AlphamissenseQuery) -> Resul
         AND pos = $2
         AND ref = $3
         AND alt = $4
-        AND genome = $5;", query.chrom, query.pos, query.ref_allele, query.alt_allele, query.genome
-    ).fetch(&mut **db)
-    .try_collect::<Vec<_>>()
+        AND genome = $5;",
+        query.chrom,
+        query.pos,
+        query.ref_allele,
+        query.alt_allele,
+        query.genome
+    )
+    .fetch_one(&mut **db)
     .await?;
 
     Ok(Json(results))
@@ -64,7 +85,18 @@ fn rocket() -> _ {
         allow_credentials: true,
         ..Default::default()
     }
-    .to_cors().unwrap();
+    .to_cors()
+    .unwrap();
 
-    rocket::build().mount("/", routes![get_variant]).attach(cors).attach(Db::init())
+    rocket::build()
+        .mount("/", openapi_get_routes![get_variant])
+        .mount(
+            "/swagger-ui/",
+            make_swagger_ui(&SwaggerUIConfig {
+                url: "../openapi.json".to_owned(),
+                ..Default::default()
+            }),
+        )
+        .attach(cors)
+        .attach(Db::init())
 }
