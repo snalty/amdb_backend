@@ -2,7 +2,6 @@
 extern crate rocket;
 
 use rocket::{
-    futures::TryStreamExt,
     http::Method,
     serde::{json::Json, Deserialize, Serialize},
 };
@@ -11,7 +10,7 @@ use rocket_db_pools::{sqlx, Connection, Database};
 use rocket_okapi::{
     okapi::schemars,
     openapi_get_routes,
-    swagger_ui::{make_swagger_ui, SwaggerUIConfig}, rapidoc::{RapiDocConfig, make_rapidoc, GeneralConfig, HideShowConfig}, settings::UrlObject,
+    swagger_ui::{make_swagger_ui, SwaggerUIConfig}
 };
 use rocket_okapi::{okapi::schemars::JsonSchema, openapi};
 

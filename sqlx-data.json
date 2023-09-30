@@ -1,0 +1,81 @@
+{
+  "db": "PostgreSQL",
+  "93103a4e64bd250d545d1e25faf8d1c64d8d967abec10ff2a89340c00fb6658d": {
+    "describe": {
+      "columns": [
+        {
+          "name": "chrom",
+          "ordinal": 0,
+          "type_info": "Text"
+        },
+        {
+          "name": "pos",
+          "ordinal": 1,
+          "type_info": "Int4"
+        },
+        {
+          "name": "ref",
+          "ordinal": 2,
+          "type_info": "Bpchar"
+        },
+        {
+          "name": "alt",
+          "ordinal": 3,
+          "type_info": "Bpchar"
+        },
+        {
+          "name": "genome",
+          "ordinal": 4,
+          "type_info": "Text"
+        },
+        {
+          "name": "uniprot_id",
+          "ordinal": 5,
+          "type_info": "Text"
+        },
+        {
+          "name": "transcript_id",
+          "ordinal": 6,
+          "type_info": "Text"
+        },
+        {
+          "name": "protein_variant",
+          "ordinal": 7,
+          "type_info": "Text"
+        },
+        {
+          "name": "am_pathogenicity",
+          "ordinal": 8,
+          "type_info": "Float8"
+        },
+        {
+          "name": "am_class",
+          "ordinal": 9,
+          "type_info": "Varchar"
+        }
+      ],
+      "nullable": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "parameters": {
+        "Left": [
+          "Text",
+          "Int4",
+          "Bpchar",
+          "Bpchar",
+          "Text"
+        ]
+      }
+    },
+    "query": "SELECT * FROM alphamissense \n        WHERE chrom = $1\n        AND pos = $2\n        AND ref = $3\n        AND alt = $4\n        AND genome = $5;"
+  }
+}

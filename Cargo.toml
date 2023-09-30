@@ -11,4 +11,4 @@ rocket_cors = "0.6.0-alpha2"
 rocket_db_pools = { version = "0.1.0-rc.3", features = ["sqlx_postgres"] }
 rocket_okapi = { version="0.8.0-rc.3", features = ["swagger", "rapidoc", "rocket_db_pools"] }
 serde = "1.0"
-sqlx = { version = "0.6", default-features = false, features = ["postgres", "macros", "bigdecimal"] }
+sqlx = { version = "0.6", default-features = false, features = ["postgres", "macros", "bigdecimal", "offline"] }
