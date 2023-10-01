@@ -51,7 +51,7 @@ struct AlphamissenseQuery {
 async fn get_variant(
     mut db: Connection<Db>,
     query: AlphamissenseQuery,
-) -> Result<Json<AlphamissenseResult>> {
+) -> Result<Json<Option<AlphamissenseResult>>> {
     let results = sqlx::query_as!(
         AlphamissenseResult,
         "SELECT * FROM alphamissense 
@@ -66,7 +66,7 @@ async fn get_variant(
         query.alt_allele,
         query.genome
     )
-    .fetch_one(&mut **db)
+    .fetch_optional(&mut **db)
     .await?;
 
     Ok(Json(results))
