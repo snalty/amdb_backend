@@ -74,7 +74,7 @@ async fn get_variant(
 
 #[launch]
 fn rocket() -> _ {
-    let allowed_origins = AllowedOrigins::some_exact(&["http://localhost:5173"]);
+    let allowed_origins = AllowedOrigins::all();
 
     // You can also deserialize this
     let cors = rocket_cors::CorsOptions {
