@@ -299,16 +299,17 @@ async fn get_variant(request: Request, ctx: RouteContext<()>) -> worker::Result<
         }
     };
 
-    // Add CORS headers to response
-    let cors = Cors::new().with_origins(["*"]);
-
-    response.map(|r| r.with_cors(&cors))?
+    response
 }
 
 #[event(fetch)]
 async fn fetch(req: Request, env: Env, _ctx: Context) -> worker::Result<Response> {
+    // Add CORS headers to response
+    let cors = Cors::new().with_origins(["*"]);
+
     Router::new()
         .get_async("/v1/variant", get_variant)
         .run(req, env)
-        .await
+        .await?
+        .with_cors(&cors)
 }
