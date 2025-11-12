@@ -1,5 +1,0 @@
-name = "axum-on-workers"
-main = "build/index.js"
-
-[build]
-command = "cargo install worker-build && worker-build --release"
