@@ -2,8 +2,6 @@ name = "amdb-backend"
 main = "build/index.js"
 compatibility_date = "2025-11-06"
 
-route = { pattern = "api.amdb.co.uk/v1/variant*" }
-route = { pattern = "api-dev.amdb.co.uk/v1/variant*" }
 
 
 [build]
@@ -31,6 +29,12 @@ id = "0cb972ab487f4f1e8d3605a72f05fac2"
 [[ routes ]]
 pattern = "api.amdb.co.uk"
 custom_domain = true
+
+[[ routes ]]
+pattern = "api.amdb.co.uk/v1/variant*"
+
+[[ routes ]]
+pattern = "api-dev.amdb.co.uk/v1/variant*"
 
 [observability]
 enabled = true
