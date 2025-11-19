@@ -2,6 +2,10 @@ name = "amdb-backend"
 main = "build/index.js"
 compatibility_date = "2025-11-06"
 
+route = { pattern = "api.amdb.co.uk/v1/variant*" }
+route = { pattern = "api-dev.amdb.co.uk/v1/variant*" }
+
+
 [build]
 command = "cargo install worker-build && worker-build --release"
 
@@ -23,3 +27,7 @@ id = "ea51ad1ba1054e60895adf1263c74f9e"
 [[kv_namespaces]]
 binding = "CACHE"
 id = "0cb972ab487f4f1e8d3605a72f05fac2"
+
+[[ routes ]]
+pattern = "api.amdb.co.uk"
+custom_domain = true
