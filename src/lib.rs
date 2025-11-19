@@ -5,7 +5,7 @@ use noodles::csi::binning_index::BinningIndex;
 use serde::{Deserialize, Serialize};
 use std::hash::BuildHasher;
 use std::io::Read;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 use worker::*;
 
 use rapidhash::fast::SeedableState;
@@ -184,12 +184,22 @@ async fn get_data_from_s3(
     let chunk = blocks_to_fetch
         .first()
         .expect("Should have at least one block because we return early otherwise");
-    debug!("In chunk iteration");
+
     let start = chunk.start();
     let end = chunk.end();
     let len = end.compressed() - start.compressed();
 
-    debug!("Getting required range of bytes from scores file using ranged request");
+    // If length is none
+    if len == 0 {
+        warn!("Uncompressed start and end were the same so length was 0. Assuming no valid record");
+        return Ok(None);
+    }
+
+    debug!(
+        "Getting required range of bytes ({}-{}) from scores file using ranged request",
+        start.compressed(),
+        end.compressed()
+    );
     let chunk_object_get_op = bucket
         .get(data_key.to_string())
         .range(Range::OffsetWithLength {
