@@ -31,3 +31,6 @@ id = "0cb972ab487f4f1e8d3605a72f05fac2"
 [[ routes ]]
 pattern = "api.amdb.co.uk"
 custom_domain = true
+
+[observability]
+enabled = true
