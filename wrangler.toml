@@ -32,9 +32,11 @@ custom_domain = true
 
 [[ routes ]]
 pattern = "api.amdb.co.uk/v1/variant*"
+zone_name = "amdb.co.uk"
 
 [[ routes ]]
 pattern = "api-dev.amdb.co.uk/v1/variant*"
+zone = "amdb.co.uk"
 
 [observability]
 enabled = true
