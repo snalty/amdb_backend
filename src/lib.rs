@@ -1,4 +1,5 @@
 use anyhow::anyhow;
+use bstr::ByteSlice;
 use noodles::core::region::Interval;
 use noodles::core::Position;
 use noodles::csi::binning_index::BinningIndex;
@@ -167,6 +168,8 @@ async fn get_data_from_s3(
     debug!("Getting blocks that contain ROI");
     let blocks_to_fetch = index.query(sequence_index, interval)?;
 
+    debug!("{:?}", blocks_to_fetch);
+
     if blocks_to_fetch.len() > 1 {
         error!("Query returned more than one block to fetch, something went wrong. A single record should be stored in one gzipped block!");
         return Err(anyhow!("Too many blocks returned"));
@@ -187,53 +190,28 @@ async fn get_data_from_s3(
 
     let start = chunk.start();
     let end = chunk.end();
-    let len = end.compressed() - start.compressed();
 
     // If length is none
-    if len == 0 {
+    if start == end {
         warn!("Uncompressed start and end were the same so length was 0. Assuming no valid record");
         return Ok(None);
     }
 
-    debug!(
-        "Getting required range of bytes ({}-{}) from scores file using ranged request",
-        start.compressed(),
-        end.compressed()
-    );
-    let chunk_object_get_op = bucket
-        .get(data_key.to_string())
-        .range(Range::OffsetWithLength {
-            offset: start.compressed(),
-            length: len,
-        });
-
-    let chunk_object = chunk_object_get_op
-        .execute()
-        .await?
-        .ok_or(anyhow::Error::msg(
-            "Ranged request didn't get an Object from R2",
-        ))?;
-
-    let chunk_body = chunk_object
-        .body()
-        .ok_or(anyhow::Error::msg("R2 object didn't have a body"))
-        .inspect_err(|e| error!("{e}"))?;
-
-    let chunk_bytes = chunk_body
-        .bytes()
-        .await
-        .inspect_err(|e| error!("Failed to get bytes from R2 object with error: {e}"))?;
-
-    debug!("Got the required byte ranges");
+    let chunk_bytes = get_block_from_r2(bucket, &data_key.to_string(), start.compressed()).await?;
 
     let mut bgzf_reader = noodles::bgzf::io::Reader::new(&*chunk_bytes);
 
     let mut buf = Vec::new();
 
     debug!("Reading bgzipped data");
+
     bgzf_reader.read_to_end(&mut buf)?;
 
-    // Trim leading bytes to start position in bgzf block.
+    // now get next chunk as a hacky fix
+    let chunk_bytes = get_block_from_r2(bucket, &data_key.to_string(), end.compressed()).await?;
+    let mut bgzf_reader = noodles::bgzf::io::Reader::new(&*chunk_bytes);
+    bgzf_reader.read_to_end(&mut buf)?;
+
     let buf = &buf[start.uncompressed() as usize..];
 
     match get_result_from_buf(query, buf)? {
@@ -241,6 +219,59 @@ async fn get_data_from_s3(
         BufSearchOutput::IteratedPastPosition => Ok(None),
         BufSearchOutput::RecordNotInBuf => Err(anyhow!("Value wasn't in range returned by query")),
     }
+}
+
+async fn get_block_from_r2(
+    bucket: &Bucket,
+    key: &str,
+    block_start: u64,
+) -> anyhow::Result<Vec<u8>> {
+    // let mut buf = Vec::new();
+    let block_header = get_object_range(bucket, key, block_start, block_start + 18).await?;
+
+    debug!("{:?}", block_header);
+
+    let len = get_len_from_gzip_header(&block_header).unwrap();
+
+    let block_bytes =
+        get_object_range(bucket, key, block_start, 1 + block_start + len as u64).await?;
+
+    Ok(block_bytes)
+}
+
+async fn get_object_range(
+    bucket: &Bucket,
+    key: &str,
+    start: u64,
+    end: u64,
+) -> anyhow::Result<Vec<u8>> {
+    debug!(
+        "Getting required range of bytes ({}-{}) from scores file using ranged request",
+        start, end
+    );
+
+    let len = end - start;
+
+    let chunk_object_get_op = bucket.get(key.to_string()).range(Range::OffsetWithLength {
+        offset: start,
+        length: len,
+    });
+    let chunk_object = chunk_object_get_op
+        .execute()
+        .await?
+        .ok_or(anyhow::Error::msg(
+            "Ranged request didn't get an Object from R2",
+        ))?;
+    let chunk_body = chunk_object
+        .body()
+        .ok_or(anyhow::Error::msg("R2 object didn't have a body"))
+        .inspect_err(|e| error!("{e}"))?;
+    let chunk_bytes = chunk_body
+        .bytes()
+        .await
+        .inspect_err(|e| error!("Failed to get bytes from R2 object with error: {e}"))?;
+    debug!("Got the required byte ranges");
+    Ok(chunk_bytes)
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -252,6 +283,7 @@ enum BufSearchOutput {
 }
 
 fn get_result_from_buf(query: &AlphamissenseQuery, buf: &[u8]) -> anyhow::Result<BufSearchOutput> {
+    // println!("{:?}", buf.as_bstr());
     let mut csv_reader = csv::ReaderBuilder::new()
         .delimiter(b'\t')
         .has_headers(false)
@@ -262,7 +294,7 @@ fn get_result_from_buf(query: &AlphamissenseQuery, buf: &[u8]) -> anyhow::Result
 
     for record in csv_reader.deserialize() {
         let record: AlphamissenseResult = record?;
-        debug!("Record: {:?}", record);
+        // println!("Current record: {record:?}");
 
         if record.chrom == query.chrom
             && record.pos == query.pos
@@ -348,6 +380,14 @@ async fn get_variant(request: Request, ctx: RouteContext<()>) -> worker::Result<
     };
 
     response
+}
+
+fn get_len_from_gzip_header(bytes: &[u8]) -> anyhow::Result<u16> {
+    let last_16_bits = &bytes[bytes.len() - 2..];
+
+    debug!("last 16 bits: {:?}", last_16_bits);
+
+    Ok(u16::from_le_bytes(last_16_bits.try_into()?))
 }
 
 #[event(fetch)]
