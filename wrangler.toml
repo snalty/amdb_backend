@@ -2,8 +2,6 @@ name = "amdb-backend"
 main = "build/index.js"
 compatibility_date = "2025-11-06"
 
-
-
 [build]
 command = "cargo install worker-build && worker-build --release"
 
@@ -11,6 +9,7 @@ command = "cargo install worker-build && worker-build --release"
 binding = "BUCKET"
 bucket_name = "amdb-co-uk"
 preview_bucket_name = "amdb-co-uk"
+remote = true
 
 [vars]
 HG19_INDEX_KEY = "AlphaMissense_hg19.tsv.gz.tbi"
@@ -21,10 +20,14 @@ HG38_KEY = "AlphaMissense_hg38.tsv.gz"
 [[kv_namespaces]]
 binding = "INDEXES"
 id = "ea51ad1ba1054e60895adf1263c74f9e"
+preview_id = "84234c9f06d741bcb84513b9ccc2735a"
+remote = true
 
 [[kv_namespaces]]
 binding = "CACHE"
 id = "0cb972ab487f4f1e8d3605a72f05fac2"
+preview_id = "9993d6f2640e403db0317f7df17140f3"
+remote = true
 
 [[ routes ]]
 pattern = "api.amdb.co.uk"

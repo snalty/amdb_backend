@@ -197,7 +197,16 @@ async fn get_data_from_s3(
         return Ok(None);
     }
 
-    let chunk_bytes = get_block_from_r2(bucket, &data_key.to_string(), start.compressed()).await?;
+    // Read every bgzf block from `start` through `end` as a single compressed span
+    // so the decoded stream is contiguous. Reading only the start and end blocks
+    // skips any intermediate blocks and truncates records that straddle a boundary.
+    let chunk_bytes = get_compressed_span(
+        bucket,
+        &data_key.to_string(),
+        start.compressed(),
+        end.compressed(),
+    )
+    .await?;
 
     let mut bgzf_reader = noodles::bgzf::io::Reader::new(&*chunk_bytes);
 
@@ -205,11 +214,6 @@ async fn get_data_from_s3(
 
     debug!("Reading bgzipped data");
 
-    bgzf_reader.read_to_end(&mut buf)?;
-
-    // now get next chunk as a hacky fix
-    let chunk_bytes = get_block_from_r2(bucket, &data_key.to_string(), end.compressed()).await?;
-    let mut bgzf_reader = noodles::bgzf::io::Reader::new(&*chunk_bytes);
     bgzf_reader.read_to_end(&mut buf)?;
 
     let buf = &buf[start.uncompressed() as usize..];
@@ -221,22 +225,26 @@ async fn get_data_from_s3(
     }
 }
 
-async fn get_block_from_r2(
+/// Fetches every bgzf block from `start_offset` through (and including) the block
+/// at `end_offset` in one ranged request. Requires a small pre-flight read of the
+/// final block's 18-byte header to learn its BSIZE, since the tabix `end`
+/// virtual position only points at the block start.
+async fn get_compressed_span(
     bucket: &Bucket,
     key: &str,
-    block_start: u64,
+    start_offset: u64,
+    end_offset: u64,
 ) -> anyhow::Result<Vec<u8>> {
-    // let mut buf = Vec::new();
-    let block_header = get_object_range(bucket, key, block_start, block_start + 18).await?;
+    let end_block_header = get_object_range(bucket, key, end_offset, end_offset + 18).await?;
+    let end_block_len = get_len_from_gzip_header(&end_block_header)?;
 
-    debug!("{:?}", block_header);
-
-    let len = get_len_from_gzip_header(&block_header).unwrap();
-
-    let block_bytes =
-        get_object_range(bucket, key, block_start, 1 + block_start + len as u64).await?;
-
-    Ok(block_bytes)
+    get_object_range(
+        bucket,
+        key,
+        start_offset,
+        end_offset + end_block_len as u64 + 1,
+    )
+    .await
 }
 
 async fn get_object_range(
@@ -407,30 +415,37 @@ mod tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
 
+    const SAMPLE_BUF: &str =
+        "chr1	55523855	G	C	hg19	Q8NBP7	ENST00000302118.5	A443P	0.2249	benign\n\
+        chr1	55523855	G	T	hg19	Q8NBP7	ENST00000302118.5	A443S	0.0719	benign\n\
+        chr1	55523855	G	A	hg19	Q8NBP7	ENST00000302118.5	A443T	0.0651	benign\n\
+        chr1	55523856	C	A	hg19	Q8NBP7	ENST00000302118.5	A443D	0.1676	benign\n\
+        chr1	55523856	C	G	hg19	Q8NBP7	ENST00000302118.5	A443G	0.0883	benign\n\
+        chr1	55523856	C	T	hg19	Q8NBP7	ENST00000302118.5	A443V	0.0854	benign\n\
+        chr1	55523858	C	A	hg19	Q8NBP7	ENST00000302118.5	L444M	0.124	benign\n\
+        chr1	55523858	C	G	hg19	Q8NBP7	ENST00000302118.5	L444V	0.1084	benign\n\
+        chr1	55523859	T	G	hg19	Q8NBP7	ENST00000302118.5	L444R	0.1603	benign\n\
+        chr1	55523859	T	A	hg19	Q8NBP7	ENST00000302118.5	L444Q	0.16	benign\n\
+        chr1	55523859	T	C	hg19	Q8NBP7	ENST00000302118.5	L444P	0.215	benign";
+
+    fn query(chrom: &str, pos: i32, ref_allele: &str, alt_allele: &str) -> AlphamissenseQuery {
+        AlphamissenseQuery {
+            chrom: chrom.to_string(),
+            pos,
+            ref_allele: ref_allele.to_string(),
+            alt_allele: alt_allele.to_string(),
+            genome: Genome::Hg38,
+        }
+    }
+
     #[test]
     fn test_early_return() -> anyhow::Result<()> {
-        let buf = "chr1	55523855	G	C	hg19	Q8NBP7	ENST00000302118.5	A443P	0.2249	benign\n\
-            chr1	55523855	G	T	hg19	Q8NBP7	ENST00000302118.5	A443S	0.0719	benign\n\
-            chr1	55523855	G	A	hg19	Q8NBP7	ENST00000302118.5	A443T	0.0651	benign\n\
-            chr1	55523856	C	A	hg19	Q8NBP7	ENST00000302118.5	A443D	0.1676	benign\n\
-            chr1	55523856	C	G	hg19	Q8NBP7	ENST00000302118.5	A443G	0.0883	benign\n\
-            chr1	55523856	C	T	hg19	Q8NBP7	ENST00000302118.5	A443V	0.0854	benign\n\
-            chr1	55523858	C	A	hg19	Q8NBP7	ENST00000302118.5	L444M	0.124	benign\n\
-            chr1	55523858	C	G	hg19	Q8NBP7	ENST00000302118.5	L444V	0.1084	benign\n\
-            chr1	55523859	T	G	hg19	Q8NBP7	ENST00000302118.5	L444R	0.1603	benign\n\
-            chr1	55523859	T	A	hg19	Q8NBP7	ENST00000302118.5	L444Q	0.16	benign\n\
-            chr1	55523859	T	C	hg19	Q8NBP7	ENST00000302118.5	L444P	0.215	benign";
-
-        let query = AlphamissenseQuery {
-            chrom: "chr1".to_string(),
-            pos: 55523857,
-            ref_allele: "A".to_string(),
-            alt_allele: "A".to_string(),
-            genome: Genome::Hg38,
-        };
+        // Query at pos 55523857 sits between rows; iterator should detect pos>query.pos
+        // on the chr1 row at 55523858 and stop early.
+        let q = query("chr1", 55523857, "A", "A");
 
         assert_eq!(
-            get_result_from_buf(&query, buf.as_bytes())?,
+            get_result_from_buf(&q, SAMPLE_BUF.as_bytes())?,
             BufSearchOutput::IteratedPastPosition
         );
 
@@ -439,32 +454,13 @@ mod tests {
 
     #[test]
     fn test_query() -> anyhow::Result<()> {
-        let buf = "chr1	55523855	G	C	hg19	Q8NBP7	ENST00000302118.5	A443P	0.2249	benign\n\
-            chr1	55523855	G	T	hg19	Q8NBP7	ENST00000302118.5	A443S	0.0719	benign\n\
-            chr1	55523855	G	A	hg19	Q8NBP7	ENST00000302118.5	A443T	0.0651	benign\n\
-            chr1	55523856	C	A	hg19	Q8NBP7	ENST00000302118.5	A443D	0.1676	benign\n\
-            chr1	55523856	C	G	hg19	Q8NBP7	ENST00000302118.5	A443G	0.0883	benign\n\
-            chr1	55523856	C	T	hg19	Q8NBP7	ENST00000302118.5	A443V	0.0854	benign\n\
-            chr1	55523858	C	A	hg19	Q8NBP7	ENST00000302118.5	L444M	0.124	benign\n\
-            chr1	55523858	C	G	hg19	Q8NBP7	ENST00000302118.5	L444V	0.1084	benign\n\
-            chr1	55523859	T	G	hg19	Q8NBP7	ENST00000302118.5	L444R	0.1603	benign\n\
-            chr1	55523859	T	A	hg19	Q8NBP7	ENST00000302118.5	L444Q	0.16	benign\n\
-            chr1	55523859	T	C	hg19	Q8NBP7	ENST00000302118.5	L444P	0.215	benign";
+        let q = query("chr1", 55523856, "C", "T");
 
-        let query = AlphamissenseQuery {
-            chrom: "chr1".to_string(),
-            pos: 55523856,
-            ref_allele: "C".to_string(),
-            alt_allele: "T".to_string(),
-            genome: Genome::Hg38,
-        };
-
-        let result = match get_result_from_buf(&query, buf.as_bytes())? {
+        let result = match get_result_from_buf(&q, SAMPLE_BUF.as_bytes())? {
             BufSearchOutput::Some(r) => r,
             _ => panic!("The result should be in the buffer"),
         };
 
-        // chr1	55523856	C	T	hg19	Q8NBP7	ENST00000302118.5	A443V	0.0854	benign\n\
         let expected = AlphamissenseResult {
             chrom: "chr1".to_string(),
             pos: 55523856,
